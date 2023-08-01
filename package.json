@@ -4,6 +4,7 @@
   "description": "Backend server for the \"What Did I Miss?\" browser extension",
   "main": "app.js",
   "scripts": {
+    "start": "node app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
