@@ -16,18 +16,35 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/getSummary', async (req, res) => {
-    console.log('Received request to get summary')
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, // Use environment variable
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(req.body)
-    });
+    console.log('Received request to get summary');
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(req.body)
+        });
 
-    const data = await response.json();
-    res.send(data.choices[0].message);
+        // Check if the fetch was successful
+        if (!response.ok) {
+            throw new Error(`OpenAI API returned ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data && data.choices && data.choices[0] && data.choices[0].message) {
+            res.send(data.choices[0].message);
+        } else {
+            throw new Error('Unexpected API response format');
+        }
+
+    } catch (error) {
+        console.error('Error fetching summary:', error);
+        // Sending a generic error message to the client for any failure
+        res.status(500).send('Internal Server Error. Unable to generate summary.');
+    }
 });
 
 const port = process.env.PORT || 3000; // use the environment variable PORT or, if nothing is provided, use 3000
