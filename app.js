@@ -1,22 +1,58 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
+const moment = require('moment');
 
 const app = express();
-const OPENING_MESSAGE = "You are a helpful assistant that summarizes recent messages on thread in a few bullet points (with line breaks). There are potentially up to three parts to your response - a very concise summary of the messages starting with the prefix 'Summary:', a list of key dates mentioned starting with the prefix 'Key dates:', and a list of action items starting with the prefix 'Action items'.";
 
 require('dotenv').config(); // Load environment variables from .env file
 
 app.use(cors());
 app.use(express.json());
 
-// landing page
+// Assuming you're storing user data somewhere like a database
+// For simplicity, using an in-memory object
+// This should be replaced with your actual data store
+const userQuotas = {};
+
+// Check the user's daily quota
+const DAILY_LIMIT = 20;
+
+const checkUserQuota = (userId) => {
+    const today = moment.utc().format('YYYY-MM-DD');
+    if (!userQuotas[userId]) {
+        userQuotas[userId] = {
+            lastAccessed: today,
+            callCount: 0
+        };
+    } else if (userQuotas[userId].lastAccessed !== today) {
+        userQuotas[userId].lastAccessed = today;
+        userQuotas[userId].callCount = 0;
+    }
+
+    console.log(`User ${userId} has made ${userQuotas[userId].callCount} API calls today`);
+    return userQuotas[userId].callCount < DAILY_LIMIT;
+};
+
+// landing page for sanity check
 app.get('/', (req, res) => {
     res.send('Hello World!');
 });
 
 app.post('/api/getSummary', async (req, res) => {
     console.log('Received request to get summary');
+    
+    const userId = req.body.metadata.userId; // Assuming the client sends userId in the request body
+
+    // if userId is not provided, return an error
+    if (!userId) {
+        return res.status(400).send('userId is required.');
+    }
+
+    if (!checkUserQuota(userId)) {
+        return res.status(429).send('Daily quota exceeded.');
+    }
+
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -24,8 +60,11 @@ app.post('/api/getSummary', async (req, res) => {
                 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(req.body)
+            body: JSON.stringify(req.body.gptBody)
         });
+
+        // Increment the user's call count
+        userQuotas[userId].callCount += 1;
 
         // Check if the fetch was successful
         if (!response.ok) {
@@ -35,7 +74,12 @@ app.post('/api/getSummary', async (req, res) => {
         const data = await response.json();
 
         if (data && data.choices && data.choices[0] && data.choices[0].message) {
-            res.send(data.choices[0].message);
+            const remainingQuota = DAILY_LIMIT - userQuotas[userId].callCount;
+            console.log(`Generated summary for user ${userId}; ${remainingQuota} API calls remaining`);
+            res.json({
+                message: data.choices[0].message,
+                remainingQuota: remainingQuota
+            });
         } else {
             throw new Error('Unexpected API response format');
         }
@@ -49,6 +93,5 @@ app.post('/api/getSummary', async (req, res) => {
 
 const port = process.env.PORT || 3000; // use the environment variable PORT or, if nothing is provided, use 3000
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`WDIM backend server listening on port ${port}`);
 });
-
