@@ -34,20 +34,40 @@ const checkUserQuota = (userId) => {
     return userQuotas[userId].callCount < DAILY_LIMIT;
 };
 
-// landing page for sanity check
-app.get('/', (req, res) => {
-    res.send('Hello World!');
-});
+const verifyToken = async (token) => {
+    const response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${token}`);
+    const data = await response.json();
+    if (data.aud !== process.env.GOOGLE_CLIENT_ID) {
+        throw new Error('Invalid token audience');
+    }
+    if (!data.email) {
+        throw new Error('Email scope was not granted or email is not verified.');
+    }
+    return data;
+};
 
 app.post('/api/getSummary', async (req, res) => {
     console.log('Received request to get summary');
-    
-    const userId = req.body.metadata.userId; // Assuming the client sends userId in the request body
 
-    // if userId is not provided, return an error
-    if (!userId) {
-        return res.status(400).send('userId is required.');
+    const token = req.body.metadata.token;
+
+    if (!token) {
+        return res.status(400).send('Token is required.');
     }
+
+    let userId;
+    let userEmail;
+    try {
+        const tokenData = await verifyToken(token);
+        if (tokenData.aud !== process.env.GOOGLE_CLIENT_ID) {
+            return res.status(401).send('Invalid token.');
+        }
+        userId = tokenData.sub;
+        userEmail = tokenData.email;
+    } catch (error) {
+        return res.status(401).send('Token verification failed.');
+    }
+
 
     if (!checkUserQuota(userId)) {
         return res.status(429).send('Daily quota exceeded.');
@@ -75,7 +95,7 @@ app.post('/api/getSummary', async (req, res) => {
 
         if (data && data.choices && data.choices[0] && data.choices[0].message) {
             const remainingQuota = DAILY_LIMIT - userQuotas[userId].callCount;
-            console.log(`Generated summary for user ${userId}; ${remainingQuota} API calls remaining`);
+            console.log(`Generated summary for user ${userId} (${userEmail}); ${remainingQuota} daily API calls remaining`);
             res.json({
                 message: data.choices[0].message,
                 remainingQuota: remainingQuota
@@ -89,6 +109,11 @@ app.post('/api/getSummary', async (req, res) => {
         // Sending a generic error message to the client for any failure
         res.status(500).send('Internal Server Error. Unable to generate summary.');
     }
+});
+
+// landing page for sanity check
+app.get('/', (req, res) => {
+    res.send('Hello World!');
 });
 
 const port = process.env.PORT || 3000; // use the environment variable PORT or, if nothing is provided, use 3000
